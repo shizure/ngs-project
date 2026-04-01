@@ -23,6 +23,7 @@ knitr::opts_chunk$set(echo = TRUE)
 \newpage 
 
 # Setting The Environment
+
 ```{r, message=FALSE, warning=FALSE}
 # ============================================================
 # Install and Call Required NameSpaces
@@ -56,8 +57,25 @@ for (pkg in bioc_pkgs) {
   }
 }
 ```
+\newpage
 
 # Explarotary Analysis
+
+```{r}
+# ============================================================
+# Load the Dataser from rds file
+# ============================================================
+rse <- readRDS("./opt/omicsdata/datasets/SRP029880.rds")
+rse
+
+# Inspect row and column names of the data
+message("Row names: ", paste(rownames(rse)[1:3], collapse = ", "),
+        "\nColumn names: ", paste(colnames(rse)[1:5], collapse = ", "))
+```
+
+The given dataset contains `r dim(rse)[1]` genes across `r dim(rse)[2]` samples.  
+
+The column names represent sample names and the row names represent gene IDs.
 
 # Normalization
 
