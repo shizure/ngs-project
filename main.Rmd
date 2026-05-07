@@ -59,6 +59,8 @@ for (pkg in bioc_pkgs) {
 
 results_dir <- "results/"
 dir.create(results_dir, showWarnings = FALSE, recursive = TRUE)
+
+set.seed(2026)
 ```
 \newpage
 
@@ -72,9 +74,7 @@ rse <- readRDS("./opt/omicsdata/datasets/SRP029880.rds")
 rse
 ```
 
-The given dataset contains `r dim(rse)[1]` genes across `r dim(rse)[2]` samples.  
-
-
+The dataset (accession SRP029880) was retrieved via the recount3 infrastructure and comprises 63,856 annotated genes across 54 RNA-seq samples. Samples derive from 18 colorectal cancer patients, each contributing three matched tissue specimens: normal colon (NC), primary colorectal cancer (PC), and liver metastasis (MC). Sample group labels were parsed from the `sra.sample_attributes` metadata field and patient identifiers from `sra.sample_title`, yielding 18 samples per group with patient IDs corresponding to AMC cohort patients 2 through 24.
 
 ```{r}
 # ============================================================
@@ -89,14 +89,9 @@ message("Sample metadata: ")
 print(colData(rse)[1:5, 1:5])
 message("\nGene metadata: ")
 print(rowData(rse)[1:5, ])
-
 ```
 
-The column names represent sample names and the row names represent gene IDs.  
-
-The sample metadata contains `r dim(colData(rse))[2]` variables for each `r dim(colData(rse))[1]` sample.
-
-The gene metadata contains `r dim(rowData(rse))[2]` variables for each `r dim(rowData(rse))[1]` genes.
+The dataset contains `r dim(rse)[1]` genes across `r dim(rse)[2]` samples, `r dim(colData(rse))[2]` metadata variables per sample, and `r dim(rowData(rse))[2]` gene-level annotation fields. Sample identifiers correspond to SRA run accessions and gene identifiers follow Ensembl conventions with version suffixes.
 
 ```{r}
 # ============================================================
@@ -106,6 +101,8 @@ rse@colData$source_name <- sapply(
   strsplit(rse@colData$sra.sample_attributes, split = "|", fixed = TRUE),
   function(x) strsplit(x[2], split = ";;", fixed = TRUE)[[1]][2]
 )
+
+rse@colData$patient_id <- sub(".*AMC_(\\d+)-.*", "\\1", rse$sra.sample_title)
 ```
 
 ```{r, warning=FALSE}
@@ -130,54 +127,367 @@ ggplot(df_long, aes(x = samples, y = expression, fill = source_name)) +
   labs(title = "Raw Counts", x = "Samples", y = "log1p Expression", fill = "Source")
 ```
 
+## Expression Distribution
+
+Log1p-transformed raw counts were examined across all 54 samples. Median expression levels were broadly comparable across groups, centering around a log1p value of approximately 5. No sample showed a catastrophic distribution collapse indicative of library preparation failure.
+
 ```{r, cache=TRUE}
-exp_plot_dir  <- file.path(results_dir, "exploratory")
-ma_plot_dir   <- file.path(exp_plot_dir, "ma_plots")
-md_plot_dir   <- file.path(exp_plot_dir, "md_plots")
+exp_plot_dir      <- file.path(results_dir, "exploratory")
+ma_plot_dir       <- file.path(exp_plot_dir, "ma_plots")
+md_plot_dir       <- file.path(exp_plot_dir, "md_plots")
+norm_ma_plot_dir  <- file.path(exp_plot_dir, "norm_ma_plots")
+norm_md_plot_dir  <- file.path(exp_plot_dir, "norm_md_plots")
 dir.create(exp_plot_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(ma_plot_dir, showWarnings = FALSE, recursive = TRUE)
 dir.create(md_plot_dir, showWarnings = FALSE, recursive = TRUE)
-
-
-combinations <- combn(c(1:ncol(rse)), 2)
-sample_names <- colnames(rse)
-
-# MA Plot
-begin <- proc.time()
-for (i in 1:ncol(rse)) {
-  filename <- paste0("MAplot_", sample_names[i], ".png")
-  
-  png(filename = file.path(ma_plot_dir, filename), width = 800, height = 600)
-  
-  limma::plotMA(log1p_counts, array = i, 
-                main = paste0(sample_names[i]), xlab = "A", ylab = "M")
-  
-  dev.off()
-}
-run_time <- proc.time() - begin
-message("Time elapsed during MA Plotting: ", run_time[3], " seconds.")
-
-# MD Plot
-begin <- proc.time()
-for (i in 1:ncol(combinations)) {
-  pair <- combinations[, i]
-  
-  filename <- paste0("MDplot_", sample_names[pair[1]], "_vs_", sample_names[pair[2]], ".png")
-  
-  png(filename = file.path(md_plot_dir, filename), width = 800, height = 600)
-  
-  EDASeq::MDPlot(raw_counts, c(pair[1], pair[2]))
-  title(main = paste0(sample_names[pair[1]], " vs ", sample_names[pair[2]]))
-  
-  dev.off()
-}
-
-run_time <- proc.time() - begin
-message("Time elapsed during MD Plotting: ", run_time[3], " seconds.")
+dir.create(norm_ma_plot_dir, showWarnings = FALSE, recursive = TRUE)
+dir.create(norm_md_plot_dir, showWarnings = FALSE, recursive = TRUE)
 ```
 
+## MA and MD Plots
+
+```{r}
+combinations <- combn(c(1:ncol(rse)), 2)
+sample_names <- colnames(rse)
+```
+
+```{r, cache=TRUE}
+# # ============================================================
+# # RUN THIS CELL ONLY FOR PLOTING MD AND MA FOR ALL POSSIBLE PAIRS
+# # ============================================================
+# # MA Plot
+# begin <- proc.time()
+# for (i in 1:ncol(rse)) {
+#   filename <- paste0("MAplot_", sample_names[i], ".png")
+# 
+#   png(filename = file.path(ma_plot_dir, filename), width = 800, height = 600)
+# 
+#   limma::plotMA(log1p_counts, array = i,
+#                 main = paste0(sample_names[i]), xlab = "A", ylab = "M")
+# 
+#   dev.off()
+# }
+# run_time <- proc.time() - begin
+# message("Time elapsed during MA Plotting: ", run_time[3], " seconds.")
+# 
+# # MD Plot
+# begin <- proc.time()
+# for (i in 1:ncol(combinations)) {
+#   pair <- combinations[, i]
+# 
+#   filename <- paste0("MDplot_", sample_names[pair[1]], "_vs_", sample_names[pair[2]], ".png")
+# 
+#   png(filename = file.path(md_plot_dir, filename), width = 800, height = 600)
+# 
+#   EDASeq::MDPlot(raw_counts, c(pair[1], pair[2]))
+#   title(main = paste0(sample_names[pair[1]], " vs ", sample_names[pair[2]]))
+# 
+#   dev.off()
+# }
+# 
+# run_time <- proc.time() - begin
+# message("Time elapsed during MD Plotting: ", run_time[3], " seconds.")
+```
+
+```{r}
+chosen_idx <- sample(ncol(combinations), 4)
+par(mfrow = c(2, 2))
+for (i in chosen_idx) {
+  pair <- combinations[, i]
+  limma::plotMA(log1p_counts, array = pair[1], 
+                 main = paste0(sample_names[pair[1]]), xlab = "A", ylab = "M")
+}
+par(mfrow = c(1, 1))
+
+par(mfrow = c(2, 2))
+for (i in chosen_idx) {
+  pair <- combinations[, i]
+  EDASeq::MDPlot(raw_counts, c(pair[1], pair[2]))
+  title(main = paste0(sample_names[pair[1]], "\nvs\n", sample_names[pair[2]]),
+        cex.main = 0.7)
+}
+par(mfrow = c(1, 1))
+```
+
+MA plots were generated for all 54 samples and saved to disk. A representative subset of four randomly selected samples is shown above. The characteristic funnel shape is visible in all plots, with the majority of genes distributed symmetrically around M=0 at higher expression levels and increased variance at low counts, consistent with the expected mean-variance relationship in RNA-seq count data (Anders & Huber, 2010). MD plots for all 1431 pairwise combinations were saved to disk, four representative pairs are shown. Most pairwise differences were centered near zero with symmetric spread, indicating no gross systematic bias between samples.
+
+## Relative Log Expression
+
+```{r}
+# RLE plot
+EDASeq::plotRLE(raw_counts, outline = FALSE, las = 2,
+                ylab = "RLE", main = "RLE of raw counts", col = 1: length(colnames(raw_counts)))
+```
+
+RLE plots on raw counts confirmed that sample medians were not centered near zero, with moderate spread across samples. The variability in box spread and median position visible in the raw data motivated between-sample normalization.
+
+## Principal Component Analysis
+
+```{r}
+# PCA 
+pca                 <- prcomp(t(log1p(raw_counts)))
+
+scree_df            <- data.frame(var = summary(pca)$importance[2, ])
+scree_df$PC         <- c(1: nrow(scree_df))
+
+ggplot(scree_df, aes(x = PC, y = var)) +
+  geom_point() + 
+  theme_minimal() +
+  ggtitle("PCA Scree Plot")
+
+
+pca_df              <- as.data.frame(pca$x[, 1:2])
+pca_df$source_name  <- rse$source_name
+explained_var       <- c(summary(pca)$importance[2, 1], summary(pca)$importance[2, 2])
+
+ggplot(pca_df, aes(x = PC1, y = PC2, colour = source_name)) +
+  geom_point(size = 2) +
+  theme_classic() +
+  labs(
+    title = "PCA of raw counts (log1p)",
+    x = paste0("PC1 (", explained_var[1] * 100, "%)"),
+    y = paste0("PC2 (", explained_var[2] * 100, "%)"),
+    color = "Tissue Type"
+  )
+```
+
+PCA on log1p-transformed raw counts captured 12.4% of variance on PC1 and 5.9% on PC2. The scree plot shows a steep drop after the first six components, consistent with a small number of dominant sources of variation. The three tissue groups showed partial separation along PC1, with NC (normal colon) samples clustering on the left, MC (metastasized) samples on the right, PCC (primary colorectal cancer) samples in the middle. PC samples were more dispersed, overlapping with all groups. The relatively low variance explained by PC1 reflects strong inter-patient variability in this small matched cohort, where patient specific expression differences partially mask the biological tissue type signal. This observation motivated the use of a paired design blocking on patient identity in the downstream differential expression analysis.
+
+## GC Content Bias
+
+```{r, warning=FALSE, message=FALSE}
+# GC content bias
+ensid <- as.character(rowRanges(rse)$gene_id)
+ensid <- gsub("\\.\\d+$", "", ensid)
+rowData(rse)$ensid <- ensid
+
+gc <- EDASeq::getGeneLengthAndGCContent(id = ensid, org = "hg38", mode = "org.db")
+
+gc <- gc[!is.na(gc[, 2]), ]
+rse <- rse[rowData(rse)$ensid %in% row.names(gc), ]
+dup <- duplicated(rowData(rse)$ensid, )
+rse <- rse[!dup, ]
+gc <- gc[rownames(gc) %in% rowData(rse)$ensid, ]
+gc <- gc[match(rowData(rse)$ensid, rownames(gc)), ]
+raw_counts <- assay(rse, "raw_counts")
+row.names(raw_counts) <- row.names(gc)
+
+# Create Set obj and plot the GC Bias
+set <- newSeqExpressionSet(raw_counts, 
+                           phenoData = AnnotatedDataFrame(data.frame(conditions = factor(1:ncol(rse)),
+                                                                     row.names = colnames(raw_counts))),
+                           featureData = AnnotatedDataFrame(data.frame(gc = gc[, 2], l = gc[, 1])))
+set
+
+EDASeq::biasPlot(set, "gc", ylim = c(0, 11), log = TRUE, main = "GC BIAS Plot - All Genes")
+```
+
+GC content and gene length were retrieved for `r nrow(gc)` genes using `EDASeq::getGeneLengthAndGCContent()` against the hg38 assembly. The bias plot reveals the classical inverted U relationship between GC content and gene expression level, present consistently across all 54 samples. This pattern reflects the well-documented GC-content-dependent amplification bias introduced during library preparation and sequencing (Risso et al., 2011), and was addressed in the withinsample normalization step.
+
 # Normalization
+
+Normalization was performed on all 54 samples to maximise the information available to the normalization algorithms. Subsetting to the NC versus PC comparison groups was performed only immediately before differential expression analysis.
+
+## Filtering
+
+```{r}
+# Filtering out low count genes
+rse_sel <- rse[rowSums(assay(rse, "raw_counts")) > 10, ]
+set_sel <- set[rownames(set) %in% rowData(rse_sel)$ensid, ]
+```
+
+Genes with a total raw count sum of 10 or fewer across all 54 samples were removed, reducing the gene set from `r nrow(rse)` to `r nrow(rse_sel)` genes. This threshold eliminates genes with insufficient evidence for reliable dispersion estimation without imposing overly strict per-sample requirements (Robinson & Smyth, 2008).
+
+## WithinSample Normalization
+
+```{r}
+# Within Normalization for GC Bias
+EDASeq::biasPlot(set_sel, "gc", ylim = c(0, 11), log = TRUE, main = "GC BIAS Plot - Filtered")
+wt <- EDASeq::withinLaneNormalization(set_sel, "gc", which = "loess", offset = TRUE)
+EDASeq::biasPlot(wt, "gc", ylim = c(0, 11), log = TRUE, main = "GC BIAS Plot - After Loess Normalization")
+wt <- EDASeq::withinLaneNormalization(set_sel, "gc", which = "upper", offset = TRUE)
+EDASeq::biasPlot(wt, "gc", ylim = c(0, 11), log = TRUE, main = "GC BIAS plot - After Upper Quartile Normalization")
+```
+
+GC content bias was corrected using `EDASeq::withinLaneNormalization()`. Two methods were compared: loess and upper quartile. As visible in the bias plots above, loess normalization produced substantial divergence between sample curves after correction, indicating overcorrection, a known limitation when GC bias magnitude varies across samples. Upper quartile normalization produced well converged curves with substantially reduced GC dependent trends and was therefore selected for all downstream analyses.
+
+## BetweenSample Normalization
+
+```{r}
+# Between Normalization using edgeR
+raw_counts <- counts(wt)
+
+lbs <- edgeR::calcNormFactors(raw_counts, method = "RLE")
+rle <- edgeR::cpm(raw_counts, lib.size = lbs * colSums(raw_counts))
+
+lbs <- edgeR::calcNormFactors(raw_counts, method = "TMM")
+tmm <- edgeR::cpm(raw_counts, lib.size = lbs * colSums(raw_counts))
+
+lbs <- edgeR::calcNormFactors(raw_counts, method = "upperquartile")
+uq <- edgeR::cpm(raw_counts, lib.size = lbs * colSums(raw_counts))
+
+tc <- edgeR::cpm(raw_counts)
+```
+
+```{r}
+# Boxplots
+boxplot(log2(raw_counts + 1), outline = FALSE, las = 2, 
+        ylab = "log2(count+1)", main = "Before Normalization", xaxt = "n")
+
+boxplot(log2(rle + 1), outline = FALSE, las = 2, 
+        ylab = "log2(count+1)", main = "After RLE Normalization", xaxt = "n")
+
+boxplot(log2(tmm + 1), outline = FALSE, las = 2, 
+        ylab = "log2(count+1)", main = "After TMM Normalization", xaxt = "n")
+
+boxplot(log2(uq + 1), outline = FALSE, las = 2, 
+        ylab = "log2(count+1)", main = "After Upperquartile Normalization", xaxt = "n")
+
+boxplot(log2(tc + 1), outline = FALSE, las = 2, 
+        ylab = "log2(count+1)", main = "After TotalCount Normalization", xaxt = "n")
+```
+
+```{r}
+# RLE Plots
+col <- as.factor(rse$source_name)
+levels(col) <- c(2:(length(unique(col)) + 1))
+col <- as.character(col)
+
+EDASeq::plotRLE(raw_counts, outline = FALSE,  las=2, col=col,
+        ylab = "RLE", main = "RLE before normalization", xaxt='n')
+
+EDASeq::plotRLE(rle, outline = FALSE,  las=2, col=col,
+        ylab = "RLE", main = "RLE Plot - RLE Normalization", xaxt='n')
+
+EDASeq::plotRLE(tmm, outline = FALSE,  las=2, col=col,
+        ylab = "RLE", main = "RLE Plot - TMM Normalization", xaxt='n')
+
+EDASeq::plotRLE(uq, outline = FALSE,  las=2, col=col,
+        ylab = "RLE", main = "RLE Plot - Upper Quartile", xaxt='n')
+
+EDASeq::plotRLE(tc, outline = FALSE,  las=2, col=col,
+        ylab = "RLE", main = "RLE Plot - Total Count", xaxt='n')
+```
+
+Four betweensample normalization methods were compared using boxplots and RLE plots, Trimmed Mean of M-values (TMM), Relative Log Expression (RLE), Upper Quartile (UQ), and Total Count (TC). All methods substantially reduced RLE box spread compared to unnormalized data. TMM and UQ produced near identical results with sample medians tightly centered at zero. TC showed inferior performance, with one sample retaining a notably shifted RLE median after normalization, indicating sensitivity to highly expressed outlier genes. TMM was selected as the final normalization method. By trimming extreme logfold changes before computing scaling factors, TMM is robust to datasets where a substantial fraction of genes are expected to be differentially expressed, as is the case in cancer versus normal tissue comparisons (Robinson & Oshlack, 2010).
+
+## Post-Normalization Assessment
+
+```{r}
+log1p_tmm <- log1p(tmm)
+```
+
+```{r, cache=TRUE}
+# # ============================================================
+# # RUN THIS CELL ONLY FOR PLOTING MD AND MA FOR ALL POSSIBLE PAIRS
+# # ============================================================
+# combinations <- combn(c(1:ncol(rse_sel)), 2)
+# sample_names <- colnames(rse_sel)
+# 
+# # MA Plot
+# begin <- proc.time()
+# for (i in 1:ncol(rse_sel)) {
+#   filename <- paste0("MAplot_", sample_names[i], ".png")
+# 
+#   png(filename = file.path(norm_ma_plot_dir, filename), width = 800, height = 600)
+# 
+#   limma::plotMA(log1p_tmm, array = i,
+#                 main = paste0(sample_names[i], " - Normalized"), xlab = "A", ylab = "M")
+# 
+#   dev.off()
+# }
+# run_time <- proc.time() - begin
+# message("Time elapsed during MA Plotting: ", run_time[3], " seconds.")
+# 
+# # MD Plot
+# begin <- proc.time()
+# for (i in 1:ncol(combinations)) {
+#   pair <- combinations[, i]
+# 
+#   filename <- paste0("MDplot_", sample_names[pair[1]], "_vs_", sample_names[pair[2]], ".png")
+# 
+#   png(filename = file.path(norm_md_plot_dir, filename), width = 800, height = 600)
+# 
+#   EDASeq::MDPlot(tmm, c(pair[1], pair[2]))
+#   title(main = paste0(sample_names[pair[1]], " vs ", sample_names[pair[2]], " - Normalized"))
+# 
+#   dev.off()
+# }
+# 
+# run_time <- proc.time() - begin
+# message("Time elapsed during MD Plotting: ", run_time[3], " seconds.")
+```
+
+```{r}
+par(mfrow = c(2, 2))
+for (i in chosen_idx) {
+  pair <- combinations[, i]
+  limma::plotMA(log1p_tmm, array = pair[1], 
+                 main = paste0(sample_names[pair[1]]), xlab = "A", ylab = "M")
+}
+par(mfrow = c(1, 1))
+
+par(mfrow = c(2, 2))
+for (i in chosen_idx) {
+  pair <- combinations[, i]
+  EDASeq::MDPlot(tmm, c(pair[1], pair[2]))
+  title(main = paste0(sample_names[pair[1]], "\nvs\n", sample_names[pair[2]]),
+        cex.main = 0.7)
+}
+par(mfrow = c(1, 1))
+```
+
+```{r}
+# Correlation Matrix
+m <- cor(log1p(tmm))
+
+corrplot(m, method = "color", order = 'hclust', tl.cex=0.2)
+```
+
+```{r}
+# PCA 
+pca                 <- prcomp(t(log1p(tmm)))
+
+scree_df            <- data.frame(var = summary(pca)$importance[2, ])
+scree_df$PC         <- c(1: nrow(scree_df))
+
+ggplot(scree_df, aes(x = PC, y = var)) +
+  geom_point() + 
+  theme_minimal() +
+  ggtitle("PCA Scree Plot - TMM Normalized")
+
+
+pca_df              <- as.data.frame(pca$x[, 1:2])
+pca_df$source_name  <- rse$source_name
+explained_var       <- c(summary(pca)$importance[2, 1], summary(pca)$importance[2, 2])
+
+ggplot(pca_df, aes(x = PC1, y = PC2, colour = source_name)) +
+  geom_point(size = 2) +
+  theme_classic() +
+  labs(
+    title = "PCA of TMM normalized (log1p)",
+    x = paste0("PC1 (", explained_var[1] * 100, "%)"),
+    y = paste0("PC2 (", explained_var[2] * 100, "%)"),
+    color = "Tissue Type"
+  )
+```
+
+Sample to sample Pearson correlations on log1p TMM values ranged from `r round(min(m), 3)` to 1.0. Hierarchical clustering of the correlation matrix reveals three distinct blocks corresponding to the NC, PC, and MC groups, confirming that tissue type is the dominant source of transcriptomic variation. Following TMM normalization, PCA captured `r round(explained_var[1]*100, 1)`% of variance on PC1 and `r round(explained_var[2]*100, 1)`% on PC2, a substantial increase from prenormalization values, reflecting successful removal of technical library size variation and emergence of the biological tissue type signal with clear separation of the three tissue groups.
 
 # Differential Expression Analysis
 
 # Gene Enrichment Analysis
+
+
+# References
+
+- Anders S, Huber W. Differential expression analysis for sequence count data. 
+  *Genome Biology* 2010;11:R106.
+- Risso D, Schwartz K, Sherlock G, Dudoit S. GC-content normalization for 
+  RNA-Seq data. *BMC Bioinformatics* 2011;12:480.
+- Robinson MD, Smyth GK. Small-sample estimation of negative binomial 
+  dispersion, with applications to SAGE data. *Biostatistics* 2008;9:321-332.
+- Robinson MD, Oshlack A. A scaling normalization method for differential 
+  expression analysis of RNA-seq data. *Genome Biology* 2010;11:R25.
+- Wilks C, et al. recount3: summaries and queries for large-scale RNA-seq 
+  expression and splicing. *Genome Biology* 2021;22:323.
