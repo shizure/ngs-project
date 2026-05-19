@@ -500,6 +500,8 @@ load("normalization.RData")
 
 ## EdgeR
 
+Differential expression analysis was performed on the subset of 18 normal colon (NC) and 18 primary colorectal cancer (PC) samples, excluding the metastasized cancer group. A paired design was used to account for the matched nature of the samples, with patient identity included as a blocking factor in the design matrix (`~ patient_id + source_name`). This accounts for interpatient transcriptomics variability and increases statistical power for detecting tissue-type effects.
+
 ```{r Subsetting for DEG}
 # Subsetting Normal Colon and Primary Colorectal Cancer
 keep                <- rse_sel$source_name %in% c("normal colon", "primary colorectal cancer")
@@ -561,6 +563,8 @@ edR_res <- edgeR::glmLRT(fit, coef = ncol(design))
 limma::plotMD(edR_res)
 ```
 
+TMM normalization factors were recalculated within the edgeR framework for consistency with dispersion estimation. Dispersion was estimated using `edgeR::estimateDisp()`, which fits common, trended, and tagwise dispersions sequentially. The biological coefficient of variation (BCV) was `r round(sqrt(dge$common.dispersion), 3)`, reflecting high-moderate transcriptomics heterogeneity across patients, consistent with the known molecular heterogeneity of colorectal cancer (Cancer Genome Atlas Network, 2012).
+
 ```{r Filtering EdgeR Results}
 # Filter DEG results
 res_df_edR        <- edgeR::topTags(edR_res, sort.by="PValue", n = Inf, adjust.method = "BH")$table
@@ -572,18 +576,26 @@ cat("Total DEGs (FDR < 0.05):", nrow(sig_de_edR), "\n",
     "Downregulated in PC:", sum(sig_de_edR$logFC < 0), "\n")
 ```
 
+The GLM likelihood ratio test identified `r nrow(sig_de_edR)` differentially expressed genes at $FDR \le 0.05$, of which `r sum(sig_de_edR$logFC > 0)` were upregulated and `r sum(sig_de_edR$logFC < 0)` were downregulated in primary colorectal cancer relative to normal colon. This large number of DEGs is consistent with the extensive transcriptomics reprogramming known to occur during colorectal tumorigenesis (Cancer Genome Atlas Network, 2012).
+
 ## DESeq2
+
+DESeq2 was applied as an independent differential expression method to enable cross validation of edgeR results. DESeq2 uses a different statistical framework where it estimates genewise dispersions with empirical Bayes shrinkage toward a fitted trend, and applies a Wald test rather than a likelihood ratio test (Love et al., 2014). The same paired design was used.
 
 ```{r DESeq2, message=FALSE}
 # Running DESeq2
 dds <- DESeq2::DESeqDataSet(rse_deg, design = ~ patient_id + source_name)
 dds <- DESeq2::DESeq(dds)
 
-dsq_res           <- DESeq2::results(dds)
-res_df_dsq        <- as.data.frame(dsq_res)
-res_df_dsq$ensid  <- gsub("\\.\\d+$", "", dsq_res@rownames)
-sig_de_dsq        <- res_df_dsq[res_df_dsq$padj <= 0.05, ]
+dsq_res               <- DESeq2::results(dds)
+res_df_dsq            <- as.data.frame(dsq_res)
+res_df_dsq$ensid      <- gsub("\\.\\d+$", "", dsq_res@rownames)
+row.names(res_df_dsq) <- res_df_dsq$ensid
+sig_de_dsq            <- res_df_dsq[res_df_dsq$padj <= 0.05, ]
+sig_de_dsq            <- sig_de_dsq[!is.na(sig_de_dsq$ensid), ]
 ```
+
+DESeq2 identified `r nrow(sig_de_dsq)` differentially expressed genes at adjusted $p-value \le 0.05$. The higher count compared to edgeR is consistent with known differences in sensitivity between the two methods. DESeq2's shrinkage estimator tends to produce tighter dispersion estimates for low count genes, recovering additional DEGs that edgeR's tagwise dispersion may flag as too variable.
 
 ## Plots
 
@@ -604,6 +616,8 @@ ggvenn::ggvenn(venn_list,
                stroke_size = 0.5,
                set_name_size = 4)
 ```
+
+The intersection of edgeR and DESeq2 significant gene sets yielded `r length(common_genes)` consensus DEGs, representing `r round(length(common_genes)/nrow(sig_de_edR)*100, 1)`% of edgeR DEGs and `r round(length(common_genes)/nrow(sig_de_dsq)*100, 1)`% of DESeq2 DEGs. This high concordance confirms robustness of the differential expression signal and reduces the likelihood of method specific false positives. The consensus gene list was used for all downstream gene set analyses.
 
 ```{r DEG Plots}
 # Volcano Plot
@@ -640,6 +654,10 @@ cut <- cutree(g$tree_col, k = 2)
 dist_mat <- dist(t(log1p(tmm_deg_sig)))
 plot(silhouette(cut, dist_mat), col=c("#2E86C1", "#EC7063"), border=NA)
 ```
+
+The volcano plot displays all genes tested by edgeR, colored by significance status. The symmetric distribution of up and downregulated genes (`r sum(sig_de_edR$logFC > 0)` up, `r sum(sig_de_edR$logFC < 0)` down) suggests broad transcriptomics reprogramming rather than a unidirectional response. The p-value histogram shows a spike near zero with a flat distribution elsewhere, confirming well calibrated test statistics and absence of systematic inflation.  
+
+Hierarchical clustering of the consensus DEG expression matrix cleanly separates NC from PC samples, as confirmed by the silhouette index computed on the two cluster solution. A silhouette width approaching 1.0 indicates that samples are well matched to their own cluster and well separated from the other, values above 0.5 are considered strong structure (Rousseeuw, 1987).
 
 ```{r DEG Saving}
 save(list = c("dds", "dge", "rse_deg", "res_df_dsq", "res_df_edR", "tmm_deg",
@@ -805,6 +823,15 @@ save(list = c("kegg", "kegg2", "reac", "ego", "ego2"), file = "enrichment.RData"
 
 \newpage
 
+# Insights on EdgeR and DESeq2 difference (i am not sure this title)
+
+```{r Define different genes}
+diff_edR <- sig_de_edR[!(row.names(sig_de_edR) %in% common_genes), ]
+diff_dsq <- sig_de_dsq[!(row.names(sig_de_dsq) %in% common_genes), ]
+```
+
+\newpage
+
 # References
 
 - Anders S, Huber W. Differential expression analysis for sequence count data. 
@@ -817,3 +844,10 @@ save(list = c("kegg", "kegg2", "reac", "ego", "ego2"), file = "enrichment.RData"
   expression analysis of RNA-seq data. *Genome Biology* 2010;11:R25.
 - Wilks C, et al. recount3: summaries and queries for large-scale RNA-seq 
   expression and splicing. *Genome Biology* 2021;22:323.
+- Love MI, Huber W, Anders S. Moderated estimation of fold change and 
+  dispersion for RNA-seq data with DESeq2. Genome Biology 2014;15:550.
+- Cancer Genome Atlas Network. Comprehensive molecular characterization of 
+  human colon and rectal cancer. Nature 2012;487:330-337.
+- Rousseeuw PJ. Silhouettes: a graphical aid to the interpretation and 
+  validation of cluster analysis. Journal of Computational and Applied 
+  Mathematics 1987;20:53-65.
