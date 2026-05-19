@@ -24,7 +24,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Setting The Environment
 
-```{r, message=FALSE, warning=FALSE}
+```{r Insalling and Loading Packages, message=FALSE, warning=FALSE}
 # ============================================================
 # Install and Call Required NameSpaces
 # ============================================================
@@ -34,8 +34,10 @@ if (!require("BiocManager", quietly = TRUE))
   install.packages("BiocManager")
 
 # Package Lists
-cran_pkgs <- c("tidyverse", "corrplot", "ggfortify", "ggplot2")
-bioc_pkgs <- c("edgeR", "EDASeq", "limma")
+cran_pkgs <- c("tidyverse", "corrplot", "ggfortify", "ggplot2", "ggrepel", "ggvenn", "knitr",
+               "ggridges", "ggupset", "ggnewscale", "stats")
+bioc_pkgs <- c("edgeR", "EDASeq", "limma", "DESeq2", "pheatmap", "cluster", "clusterProfiler",
+               "pathview", "AnnotationDbi", "org.Hs.eg.db", "ReactomePA", "enrichplot")
 
 # Check, Install, and Call NameSpaces using CRAN
 for (pkg in cran_pkgs) {
@@ -60,13 +62,28 @@ for (pkg in bioc_pkgs) {
 results_dir <- "results/"
 dir.create(results_dir, showWarnings = FALSE, recursive = TRUE)
 
+exp_plot_dir      <- file.path(results_dir, "exploratory")
+ma_plot_dir       <- file.path(exp_plot_dir, "ma_plots")
+md_plot_dir       <- file.path(exp_plot_dir, "md_plots")
+norm_ma_plot_dir  <- file.path(exp_plot_dir, "norm_ma_plots")
+norm_md_plot_dir  <- file.path(exp_plot_dir, "norm_md_plots")
+dir.create(exp_plot_dir, showWarnings = FALSE, recursive = TRUE)
+dir.create(ma_plot_dir, showWarnings = FALSE, recursive = TRUE)
+dir.create(md_plot_dir, showWarnings = FALSE, recursive = TRUE)
+dir.create(norm_ma_plot_dir, showWarnings = FALSE, recursive = TRUE)
+dir.create(norm_md_plot_dir, showWarnings = FALSE, recursive = TRUE)
+
+tables_dir        <- file.path(results_dir, "tables")
+dir.create(tables_dir, showWarnings = FALSE, recursive = TRUE)
+
 set.seed(2026)
 ```
+
 \newpage
 
 # Explarotary Analysis
 
-```{r, cache=TRUE}
+```{r Loading Data, cache=TRUE}
 # ============================================================
 # Load the Dataser from rds file
 # ============================================================
@@ -76,7 +93,7 @@ rse
 
 The dataset (accession SRP029880) was retrieved via the recount3 infrastructure and comprises 63,856 annotated genes across 54 RNA-seq samples. Samples derive from 18 colorectal cancer patients, each contributing three matched tissue specimens: normal colon (NC), primary colorectal cancer (PC), and liver metastasis (MC). Sample group labels were parsed from the `sra.sample_attributes` metadata field and patient identifiers from `sra.sample_title`, yielding 18 samples per group with patient IDs corresponding to AMC cohort patients 2 through 24.
 
-```{r}
+```{r Data Exploration}
 # ============================================================
 # Inspect Data More
 # ============================================================
@@ -93,7 +110,7 @@ print(rowData(rse)[1:5, ])
 
 The dataset contains `r dim(rse)[1]` genes across `r dim(rse)[2]` samples, `r dim(colData(rse))[2]` metadata variables per sample, and `r dim(rowData(rse))[2]` gene-level annotation fields. Sample identifiers correspond to SRA run accessions and gene identifiers follow Ensembl conventions with version suffixes.
 
-```{r}
+```{r Data Manipulation}
 # ============================================================
 # Extract information from attributes data to a new column
 # ============================================================
@@ -105,7 +122,7 @@ rse@colData$source_name <- sapply(
 rse@colData$patient_id <- sub(".*AMC_(\\d+)-.*", "\\1", rse$sra.sample_title)
 ```
 
-```{r, warning=FALSE}
+```{r Raw Expression Plot, warning=FALSE}
 # ============================================================
 # Exploratory Plots
 # ============================================================
@@ -131,27 +148,18 @@ ggplot(df_long, aes(x = samples, y = expression, fill = source_name)) +
 
 Log1p-transformed raw counts were examined across all 54 samples. Median expression levels were broadly comparable across groups, centering around a log1p value of approximately 5. No sample showed a catastrophic distribution collapse indicative of library preparation failure.
 
-```{r, cache=TRUE}
-exp_plot_dir      <- file.path(results_dir, "exploratory")
-ma_plot_dir       <- file.path(exp_plot_dir, "ma_plots")
-md_plot_dir       <- file.path(exp_plot_dir, "md_plots")
-norm_ma_plot_dir  <- file.path(exp_plot_dir, "norm_ma_plots")
-norm_md_plot_dir  <- file.path(exp_plot_dir, "norm_md_plots")
-dir.create(exp_plot_dir, showWarnings = FALSE, recursive = TRUE)
-dir.create(ma_plot_dir, showWarnings = FALSE, recursive = TRUE)
-dir.create(md_plot_dir, showWarnings = FALSE, recursive = TRUE)
-dir.create(norm_ma_plot_dir, showWarnings = FALSE, recursive = TRUE)
-dir.create(norm_md_plot_dir, showWarnings = FALSE, recursive = TRUE)
+```{r Create Required Paths, cache=TRUE}
+
 ```
 
 ## MA and MD Plots
 
-```{r}
+```{r Generate Combinations}
 combinations <- combn(c(1:ncol(rse)), 2)
 sample_names <- colnames(rse)
 ```
 
-```{r, cache=TRUE}
+```{r Pre-Normalization Plots for All Pairs, cache=TRUE}
 # # ============================================================
 # # RUN THIS CELL ONLY FOR PLOTING MD AND MA FOR ALL POSSIBLE PAIRS
 # # ============================================================
@@ -189,7 +197,7 @@ sample_names <- colnames(rse)
 # message("Time elapsed during MD Plotting: ", run_time[3], " seconds.")
 ```
 
-```{r}
+```{r Pre-Normalization Plots for Selected Pairs}
 chosen_idx <- sample(ncol(combinations), 4)
 par(mfrow = c(2, 2))
 for (i in chosen_idx) {
@@ -213,7 +221,7 @@ MA plots were generated for all 54 samples and saved to disk. A representative s
 
 ## Relative Log Expression
 
-```{r}
+```{r RLE Plot}
 # RLE plot
 EDASeq::plotRLE(raw_counts, outline = FALSE, las = 2,
                 ylab = "RLE", main = "RLE of raw counts", col = 1: length(colnames(raw_counts)))
@@ -223,7 +231,7 @@ RLE plots on raw counts confirmed that sample medians were not centered near zer
 
 ## Principal Component Analysis
 
-```{r}
+```{r Pre-Normalization PCA}
 # PCA 
 pca                 <- prcomp(t(log1p(raw_counts)))
 
@@ -255,7 +263,7 @@ PCA on log1p-transformed raw counts captured 12.4% of variance on PC1 and 5.9% o
 
 ## GC Content Bias
 
-```{r, warning=FALSE, message=FALSE}
+```{r GC Content Bias Plot, warning=FALSE, message=FALSE}
 # GC content bias
 ensid <- as.character(rowRanges(rse)$gene_id)
 ensid <- gsub("\\.\\d+$", "", ensid)
@@ -284,13 +292,15 @@ EDASeq::biasPlot(set, "gc", ylim = c(0, 11), log = TRUE, main = "GC BIAS Plot - 
 
 GC content and gene length were retrieved for `r nrow(gc)` genes using `EDASeq::getGeneLengthAndGCContent()` against the hg38 assembly. The bias plot reveals the classical inverted U relationship between GC content and gene expression level, present consistently across all 54 samples. This pattern reflects the well-documented GC-content-dependent amplification bias introduced during library preparation and sequencing (Risso et al., 2011), and was addressed in the withinsample normalization step.
 
+\newpage
+
 # Normalization
 
 Normalization was performed on all 54 samples to maximise the information available to the normalization algorithms. Subsetting to the NC versus PC comparison groups was performed only immediately before differential expression analysis.
 
 ## Filtering
 
-```{r}
+```{r Filtering}
 # Filtering out low count genes
 rse_sel <- rse[rowSums(assay(rse, "raw_counts")) > 10, ]
 set_sel <- set[rownames(set) %in% rowData(rse_sel)$ensid, ]
@@ -300,7 +310,7 @@ Genes with a total raw count sum of 10 or fewer across all 54 samples were remov
 
 ## WithinSample Normalization
 
-```{r}
+```{r WithinSample Normalization}
 # Within Normalization for GC Bias
 EDASeq::biasPlot(set_sel, "gc", ylim = c(0, 11), log = TRUE, main = "GC BIAS Plot - Filtered")
 wt <- EDASeq::withinLaneNormalization(set_sel, "gc", which = "loess", offset = TRUE)
@@ -313,8 +323,8 @@ GC content bias was corrected using `EDASeq::withinLaneNormalization()`. Two met
 
 ## BetweenSample Normalization
 
-```{r}
-# Between Normalization using edgeR
+```{r BetweenSample Normalization}
+# BetweenSample Normalization using edgeR
 raw_counts <- counts(wt)
 
 lbs <- edgeR::calcNormFactors(raw_counts, method = "RLE")
@@ -329,7 +339,7 @@ uq <- edgeR::cpm(raw_counts, lib.size = lbs * colSums(raw_counts))
 tc <- edgeR::cpm(raw_counts)
 ```
 
-```{r}
+```{r Boxplots}
 # Boxplots
 boxplot(log2(raw_counts + 1), outline = FALSE, las = 2, 
         ylab = "log2(count+1)", main = "Before Normalization", xaxt = "n")
@@ -347,7 +357,7 @@ boxplot(log2(tc + 1), outline = FALSE, las = 2,
         ylab = "log2(count+1)", main = "After TotalCount Normalization", xaxt = "n")
 ```
 
-```{r}
+```{r RLE Plots}
 # RLE Plots
 col <- as.factor(rse$source_name)
 levels(col) <- c(2:(length(unique(col)) + 1))
@@ -377,7 +387,7 @@ Four betweensample normalization methods were compared using boxplots and RLE pl
 log1p_tmm <- log1p(tmm)
 ```
 
-```{r, cache=TRUE}
+```{r Post-Normalization Plots for All Pairs, cache=TRUE}
 # # ============================================================
 # # RUN THIS CELL ONLY FOR PLOTING MD AND MA FOR ALL POSSIBLE PAIRS
 # # ============================================================
@@ -418,7 +428,7 @@ log1p_tmm <- log1p(tmm)
 # message("Time elapsed during MD Plotting: ", run_time[3], " seconds.")
 ```
 
-```{r}
+```{r Post-Normalization Plots for Selected Pairs}
 par(mfrow = c(2, 2))
 for (i in chosen_idx) {
   pair <- combinations[, i]
@@ -437,14 +447,14 @@ for (i in chosen_idx) {
 par(mfrow = c(1, 1))
 ```
 
-```{r}
+```{r Correlation Matrix}
 # Correlation Matrix
 m <- cor(log1p(tmm))
 
 corrplot(m, method = "color", order = 'hclust', tl.cex=0.2)
 ```
 
-```{r}
+```{r Post-Normalization PCA}
 # PCA 
 pca                 <- prcomp(t(log1p(tmm)))
 
@@ -474,10 +484,353 @@ ggplot(pca_df, aes(x = PC1, y = PC2, colour = source_name)) +
 
 Sample to sample Pearson correlations on log1p TMM values ranged from `r round(min(m), 3)` to 1.0. Hierarchical clustering of the correlation matrix reveals three distinct blocks corresponding to the NC, PC, and MC groups, confirming that tissue type is the dominant source of transcriptomic variation. Following TMM normalization, PCA captured `r round(explained_var[1]*100, 1)`% of variance on PC1 and `r round(explained_var[2]*100, 1)`% on PC2, a substantial increase from prenormalization values, reflecting successful removal of technical library size variation and emergence of the biological tissue type signal with clear separation of the three tissue groups.
 
+```{r Normalization Saving}
+# Saving Normalized Object
+save(list = c("rse", "rse_sel", "set", "set_sel", "wt", "tmm", "raw_counts"), file = "normalization.RData")
+```
+
+\newpage
+
 # Differential Expression Analysis
+
+```{r Normalization Loading}
+# Check if the environment contains required objects
+load("normalization.RData")
+```
+
+## EdgeR
+
+Differential expression analysis was performed on the subset of 18 normal colon (NC) and 18 primary colorectal cancer (PC) samples, excluding the metastasized cancer group. A paired design was used to account for the matched nature of the samples, with patient identity included as a blocking factor in the design matrix (`~ patient_id + source_name`). This accounts for interpatient transcriptomics variability and increases statistical power for detecting tissue-type effects.
+
+```{r Subsetting for DEG}
+# Subsetting Normal Colon and Primary Colorectal Cancer
+keep                <- rse_sel$source_name %in% c("normal colon", "primary colorectal cancer")
+rse_deg             <- rse_sel[, keep]
+rse_deg$source_name <- factor(rse_deg$source_name,
+                              levels = c("normal colon", "primary colorectal cancer"))
+rse_deg$patient_id  <- factor(rse_deg$patient_id)
+
+cat("Samples for DEG analysis:\n")
+print(table(rse_deg$source_name))
+
+# Subsetting normalized counts with exact same samples
+tmm_deg <- tmm[, keep]
+
+cat("Dimensions of TMM matrix for DEG: ", dim(tmm_deg), "\n")
+```
+
+```{r EdgeR Preperation}
+# Building DGEList 
+raw_dge           <- assay(rse_deg, "raw_counts")
+rownames(raw_dge) <- rowData(rse_deg)$ensid
+raw_dge           <- raw_dge[rownames(raw_dge) %in% rownames(tmm_deg), ]
+raw_dge           <- raw_dge[match(rownames(tmm_deg), rownames(raw_dge)), ]
+stopifnot(all(rownames(raw_dge) == rownames(tmm_deg)))
+
+cat("Genes in DEG matrix: ", nrow(raw_dge), "\n")
+
+dge <- edgeR::DGEList(counts = raw_dge, group = rse_deg$source_name)
+```
+
+```{r Design Matrix}
+# Design Matrix
+design <- model.matrix(~ patient_id + source_name, data = as.data.frame(colData(rse_deg)))
+
+cat("Design matrix dimensions:", dim(design), "\n",
+    "Coefficient of interest: source_nameprimary colorectal cancer\n")
+```
+
+```{r EdgeR, warning=FALSE}
+# Running EdgeR
+
+# Calculating normalziation factors
+dge <- edgeR::calcNormFactors(dge, method = "TMM")
+
+cat("Normalization factors summary:\n")
+print(summary(dge$samples$norm.factors))
+
+# Estimating dispersion
+dge <- edgeR::estimateDisp(dge, design)
+
+edgeR::plotMeanVar(dge, show.raw.vars = TRUE, show.ave.raw.vars = F, NBline = TRUE, show.tagwise.vars = TRUE)
+
+# Estimate the parameters
+fit <- edgeR::glmFit(dge, design)
+
+# DEG
+edR_res <- edgeR::glmLRT(fit, coef = ncol(design))
+
+limma::plotMD(edR_res)
+```
+
+TMM normalization factors were recalculated within the edgeR framework for consistency with dispersion estimation. Dispersion was estimated using `edgeR::estimateDisp()`, which fits common, trended, and tagwise dispersions sequentially. The biological coefficient of variation (BCV) was `r round(sqrt(dge$common.dispersion), 3)`, reflecting high-moderate transcriptomics heterogeneity across patients, consistent with the known molecular heterogeneity of colorectal cancer (Cancer Genome Atlas Network, 2012).
+
+```{r Filtering EdgeR Results}
+# Filter DEG results
+res_df_edR        <- edgeR::topTags(edR_res, sort.by="PValue", n = Inf, adjust.method = "BH")$table
+res_df_edR$ensid  <- row.names(res_df_edR)
+sig_de_edR        <- res_df_edR[res_df_edR$FDR <= 0.05, ]
+
+cat("Total DEGs (FDR < 0.05):", nrow(sig_de_edR), "\n",
+    "Upregulated in PC:", sum(sig_de_edR$logFC > 0), "\n",
+    "Downregulated in PC:", sum(sig_de_edR$logFC < 0), "\n")
+```
+
+The GLM likelihood ratio test identified `r nrow(sig_de_edR)` differentially expressed genes at $FDR \le 0.05$, of which `r sum(sig_de_edR$logFC > 0)` were upregulated and `r sum(sig_de_edR$logFC < 0)` were downregulated in primary colorectal cancer relative to normal colon. This large number of DEGs is consistent with the extensive transcriptomics reprogramming known to occur during colorectal tumorigenesis (Cancer Genome Atlas Network, 2012).
+
+## DESeq2
+
+DESeq2 was applied as an independent differential expression method to enable cross validation of edgeR results. DESeq2 uses a different statistical framework where it estimates genewise dispersions with empirical Bayes shrinkage toward a fitted trend, and applies a Wald test rather than a likelihood ratio test (Love et al., 2014). The same paired design was used.
+
+```{r DESeq2, message=FALSE}
+# Running DESeq2
+dds <- DESeq2::DESeqDataSet(rse_deg, design = ~ patient_id + source_name)
+dds <- DESeq2::DESeq(dds)
+
+dsq_res               <- DESeq2::results(dds)
+res_df_dsq            <- as.data.frame(dsq_res)
+res_df_dsq$ensid      <- gsub("\\.\\d+$", "", dsq_res@rownames)
+row.names(res_df_dsq) <- res_df_dsq$ensid
+sig_de_dsq            <- res_df_dsq[res_df_dsq$padj <= 0.05, ]
+sig_de_dsq            <- sig_de_dsq[!is.na(sig_de_dsq$ensid), ]
+```
+
+DESeq2 identified `r nrow(sig_de_dsq)` differentially expressed genes at adjusted $p-value \le 0.05$. The higher count compared to edgeR is consistent with known differences in sensitivity between the two methods. DESeq2's shrinkage estimator tends to produce tighter dispersion estimates for low count genes, recovering additional DEGs that edgeR's tagwise dispersion may flag as too variable.
+
+## Plots
+
+```{r Find Common Genes}
+# Create Consensus
+common_genes <- intersect(sig_de_edR$ensid, sig_de_dsq$ensid)
+
+sig_de <- sig_de_edR[sig_de_edR$ensid %in% common_genes, ]
+
+# Venn Graph
+venn_list <- list(
+  edgeR  = sig_de_edR$ensid,
+  DESeq2 = sig_de_dsq$ensid
+)
+
+ggvenn::ggvenn(venn_list,
+               fill_color = c("#F44336", "#2196F3"),
+               stroke_size = 0.5,
+               set_name_size = 4)
+```
+
+The intersection of edgeR and DESeq2 significant gene sets yielded `r length(common_genes)` consensus DEGs, representing `r round(length(common_genes)/nrow(sig_de_edR)*100, 1)`% of edgeR DEGs and `r round(length(common_genes)/nrow(sig_de_dsq)*100, 1)`% of DESeq2 DEGs. This high concordance confirms robustness of the differential expression signal and reduces the likelihood of method specific false positives. The consensus gene list was used for all downstream gene set analyses.
+
+```{r DEG Plots}
+# Volcano Plot
+names <- row.names(sig_de)
+
+res_df_edR$sign <- NA
+res_df_edR$sign[res_df_edR$logFC < 0] <- "Down"
+res_df_edR$sign[res_df_edR$logFC > 0] <- "Up"
+res_df_edR$sign[res_df_edR$FDR > 0.05] <- "NoSig"
+
+ggplot(res_df_edR, aes(x = logFC, y = -log10(FDR), color = sign)) +
+  geom_point() + theme_classic() +
+  scale_color_manual(values = c("Down" = "blue", "Up" = "red", "NoSig" = "black")) +
+  geom_text_repel(data = res_df_edR[1:20, ], aes(label = ensid), size = 2.5, max.overlaps = 20) +
+  ggtitle("Volcano Plot", subtitle = "Common Genes from EdgeR-DESeq2")
+
+# Histogram
+hist(res_df_edR$PValue, main = "p-values distribution")
+
+# Heatmap
+tmm_deg_sig <- tmm_deg[rownames(tmm_deg) %in% common_genes, ]
+
+Col <- data.frame(Subtype=rse_deg$source_name)
+rownames(Col) <- colnames(rse_deg)
+
+ann_colors = list(Subtype = c("normal colon" = "blue", "primary colorectal cancer"="lightblue"))
+
+g <- pheatmap::pheatmap(log1p(tmm_deg_sig), show_colnames = FALSE, scale = "row", show_rownames = FALSE,
+                        drop_levels = TRUE, annotation_colors = ann_colors, annotation_col = Col)
+
+# Silhouette Index
+cut <- cutree(g$tree_col, k = 2)
+
+dist_mat <- dist(t(log1p(tmm_deg_sig)))
+plot(silhouette(cut, dist_mat), col=c("#2E86C1", "#EC7063"), border=NA)
+```
+
+The volcano plot displays all genes tested by edgeR, colored by significance status. The symmetric distribution of up and downregulated genes (`r sum(sig_de_edR$logFC > 0)` up, `r sum(sig_de_edR$logFC < 0)` down) suggests broad transcriptomics reprogramming rather than a unidirectional response. The p-value histogram shows a spike near zero with a flat distribution elsewhere, confirming well calibrated test statistics and absence of systematic inflation.  
+
+Hierarchical clustering of the consensus DEG expression matrix cleanly separates NC from PC samples, as confirmed by the silhouette index computed on the two cluster solution. A silhouette width approaching 1.0 indicates that samples are well matched to their own cluster and well separated from the other, values above 0.5 are considered strong structure (Rousseeuw, 1987).
+
+```{r DEG Saving}
+save(list = c("dds", "dge", "rse_deg", "res_df_dsq", "res_df_edR", "tmm_deg",
+              "tmm_deg_sig", "sig_de_dsq", "sig_de_edR", "sig_de", "common_genes"), file = "DEG.RData")
+```
+
+\newpage
 
 # Gene Enrichment Analysis
 
+```{r DEG Loading}
+load("DEG.RData")
+```
+
+## ORA
+
+```{r Preparing For ORA, message=FALSE}
+universe  <- row.names(res_df_edR)
+sig       <- row.names(sig_de)
+
+universe_entrez <- AnnotationDbi::mapIds(org.Hs.eg.db,
+                                         keys = universe,
+                                         column = "ENTREZID",
+                                         keytype = "ENSEMBL")
+sig_entrez      <- AnnotationDbi::mapIds(org.Hs.eg.db,
+                                         keys = sig,
+                                         column = "ENTREZID",
+                                         keytype = "ENSEMBL")
+
+universe_entrez <- as.character(universe_entrez)
+sig_entrez      <- as.character(sig_entrez)
+
+cat("The gene universe has ", length(universe_entrez), " genes.\n",
+    "Among them, ", length(sig_entrez), " number of genes are significant (FDR < 0.05).")
+```
+
+### KEGG
+
+```{r ORA KEGG, message=FALSE}
+kegg <- clusterProfiler::enrichKEGG(gene = sig_entrez,
+                                    universe = universe_entrez,
+                                    organism = "hsa",
+                                    keyType = "ncbi-geneid",
+                                    pvalueCutoff = 0.05,
+                                    pAdjustMethod = "BH")
+
+write.csv(kegg@result, file = file.path(tables_dir, "ORA_KEGG.csv"), row.names = FALSE)
+```
+
+ORA KEGG Enrichment has `r dim(kegg@result)[1]` hits.
+
+```{r ORA KEGG Plots, warning=FALSE}
+barplot(kegg)
+enrichplot::dotplot(kegg)
+enrichplot::cnetplot(kegg)
+enrichplot::upsetplot(kegg)
+
+# USE THIS PLOT FOR A SPECIFIC PATHWAY
+# pathview(gene.data = sign.entrez, pathway.id = "hsa05321", species = "hsa")
+# knitr::include_graphics("hsa05321.pathview.png")
+```
+
+### Reactome
+
+```{r ORA Reactome, message=FALSE}
+reac <- ReactomePA::enrichPathway(gene = sig_entrez,
+                                  universe = universe_entrez,
+                                  organism = "human",
+                                  pvalueCutoff = 0.05,
+                                  pAdjustMethod = "BH")
+
+write.csv(reac@result, file = file.path(tables_dir, "ORA_Reac.csv"), row.names = FALSE)
+```
+
+ORA Reactome Enrichment has `r dim(reac@result)[1]` hits.
+
+```{r ORA Reactome Plots}
+barplot(reac)
+enrichplot::dotplot(reac)
+enrichplot::cnetplot(reac)
+enrichplot::upsetplot(reac)
+```
+
+### Gene Ontology
+
+```{r ORA Gene Ontology, message=FALSE}
+ego <- clusterProfiler::enrichGO(gene = sig_entrez,
+                                 universe = universe_entrez,
+                                 OrgDb = "org.Hs.eg.db",
+                                 keyType = "ENTREZID",
+                                 ont = "BP",
+                                 pvalueCutoff = 0.05,
+                                 pAdjustMethod = "BH",
+                                 readable = TRUE)
+write.csv(ego@result, file = file.path(tables_dir, "ORA_GO.csv"), row.names = FALSE)
+```
+
+```{r ORA Gene Ontology Plots, warning=FALSE}
+barplot(ego)
+enrichplot::dotplot(ego)
+enrichplot::upsetplot(ego)
+```
+
+ORA Gene Ontology Enrichment has `r dim(ego@result)[1]` hits.
+
+## GSEA
+
+```{r GSEA Preperation}
+res_df_edR$RankingScore <- sign(res_df_edR$logFC) * res_df_edR$LR
+
+tt        <- res_df_edR$RankingScore
+names(tt) <- universe_entrez
+tt        <- tt[!duplicated(names(tt))]
+sort_tt   <- sort(tt, decreasing = TRUE)
+```
+
+### KEGG
+
+```{r GSEA KEGG, message=FALSE, warning=FALSE}
+kegg2 <- clusterProfiler::gseKEGG(geneList = sort_tt,
+                                  organism = "hsa",
+                                  pvalueCutoff = 0.05,
+                                  pAdjustMethod = "BH")
+
+write.csv(kegg2@result, file = file.path(tables_dir, "GSEA_KEGG.csv"), row.names = FALSE)
+```
+
+GSEA KEGG Enrichment has `r dim(kegg2@result)[1]` hits.
+
+```{r GSEA KEGG Plots}
+enrichplot::ridgeplot(kegg2)
+
+# # USE THIS FOR A PARTICULAR HIT
+# enrichplot::gseaplot(kegg2, geneSetID = "hsa03040")
+```
+
+### Gene Ontology
+
+```{r GSEA Gene Ontology}
+ego2 <- clusterProfiler::gseGO(geneList = sort_tt,
+                               ont = "BP",
+                               OrgDb='org.Hs.eg.db',
+                               keyType = "ENTREZID",
+                               pvalueCutoff = 0.05,
+                               pAdjustMethod = "BH")
+
+write.csv(ego2@result, file = file.path(tables_dir, "GSEA_GO.csv"), row.names = FALSE)
+```
+
+GSEA Gene Ontology Enrichment has `r dim(ego2@result)[1]` hits.
+
+```{r GSEA Gene Ontology Plots}
+enrichplot::dotplot(ego2)
+enrichplot::ridgeplot(ego2)
+
+# # USE THIS FOR A PARTICILAR HIT
+# gseaplot(kkGO, geneSetID = "GO:0006334")
+```
+
+```{r Enrhichment Saving}
+save(list = c("kegg", "kegg2", "reac", "ego", "ego2"), file = "enrichment.RData")
+```
+
+\newpage
+
+# Insights on EdgeR and DESeq2 difference (i am not sure this title)
+
+```{r Define different genes}
+diff_edR <- sig_de_edR[!(row.names(sig_de_edR) %in% common_genes), ]
+diff_dsq <- sig_de_dsq[!(row.names(sig_de_dsq) %in% common_genes), ]
+```
+
+\newpage
 
 # References
 
@@ -491,3 +844,10 @@ Sample to sample Pearson correlations on log1p TMM values ranged from `r round(m
   expression analysis of RNA-seq data. *Genome Biology* 2010;11:R25.
 - Wilks C, et al. recount3: summaries and queries for large-scale RNA-seq 
   expression and splicing. *Genome Biology* 2021;22:323.
+- Love MI, Huber W, Anders S. Moderated estimation of fold change and 
+  dispersion for RNA-seq data with DESeq2. Genome Biology 2014;15:550.
+- Cancer Genome Atlas Network. Comprehensive molecular characterization of 
+  human colon and rectal cancer. Nature 2012;487:330-337.
+- Rousseeuw PJ. Silhouettes: a graphical aid to the interpretation and 
+  validation of cluster analysis. Journal of Computational and Applied 
+  Mathematics 1987;20:53-65.
